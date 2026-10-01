@@ -1,0 +1,152 @@
+import gradio as gr
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import mean_squared_error, r2_score
+
+# Load the MPG dataset
+url = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/mpg.csv"
+df = pd.read_csv(url)
+df = df[["weight", "mpg"]].dropna()
+
+# Split data into training and test sets
+X = df[["weight"]]
+y = df["mpg"]
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+    )
+
+# Train linear regression model
+linear_model = LinearRegression()
+linear_model.fit(X_train, y_train)
+
+# Train polynomial (nonlinear) regression model
+poly_model = make_pipeline(
+    PolynomialFeatures(degree=2),
+    LinearRegression()
+    )
+poly_model.fit(X_train, y_train)
+
+# Evaluate models
+linear_pred = linear_model.predict(X_test)
+poly_pred = poly_model.predict(X_test)
+
+linear_mse = mean_squared_error(y_test, linear_pred)
+poly_mse = mean_squared_error(y_test, poly_pred)
+linear_r2 = r2_score(y_test, linear_pred)
+poly_r2 = r2_score(y_test, poly_pred)
+
+
+def predict_mpg(weight, model_choice):
+    if weight is None or weight <= 0:
+        return "자동차 무게는 0보다 커야 합니다.", None
+
+    input_data = pd.DataFrame({"weight": [weight]})
+
+    if model_choice == "선형회귀":
+        prediction = linear_model.predict(input_data)[0]
+    else:
+        prediction = poly_model.predict(input_data)[0]
+
+    x_range = np.linspace(df["weight"].min(), df["weight"].max(), 200)
+    x_df = pd.DataFrame({"weight": x_range})
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.scatter(df["weight"], df["mpg"], alpha=0.5, label="Actual Data")
+    ax.plot(x_range, linear_model.predict(x_df), label="Linear Regression")
+    ax.plot(x_range, poly_model.predict(x_df), label="Polynomial Regression")
+    ax.scatter(
+        weight, prediction, color="red", marker="*", s=250,
+        label="Predicted MPG"
+        )
+
+    ax.set_xlabel("Vehicle Weight (pounds)")
+    ax.set_ylabel("Fuel Efficiency (MPG)")
+    ax.set_title("Car Fuel Efficiency Prediction")
+    ax.legend()
+    ax.grid(True)
+
+    result = (
+        f"예측 모델: {model_choice}\n"
+        f"자동차 무게: {weight:.0f} 파운드\n"
+        f"예측 연비: {prediction:.2f} MPG\n"
+        f"약 {prediction * 0.425144:.2f} km/L"
+        )
+
+    plt.close(fig)
+    return result, fig
+
+
+def compare_models():
+    model_names = ["Linear Regression", "Polynomial Regression"]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    axes[0].bar(model_names, [linear_mse, poly_mse])
+    axes[0].set_title("MSE Comparison")
+    axes[0].set_ylabel("Mean Squared Error")
+    axes[0].tick_params(axis="x", rotation=15)
+
+    axes[1].bar(model_names, [linear_r2, poly_r2])
+    axes[1].set_title("R2 Score Comparison")
+    axes[1].set_ylabel("R2")
+    axes[1].tick_params(axis="x", rotation=15)
+
+    plt.tight_layout()
+    return fig
+
+
+with gr.Blocks(title="자동차 연비 예측 계산기") as demo:
+    gr.Markdown("# 자동차 연비 예측 계산기")
+    gr.Markdown(
+        "선형회귀와 비선형회귀를 이용하여 자동차 무게에 따른 연비를 예측합니다."
+        )
+
+    weight_input = gr.Number(
+        label="자동차 무게 입력 (파운드)", value=3000, minimum=1
+        )
+    model_choice = gr.Radio(
+        choices=["선형회귀", "비선형회귀"],
+        value="선형회귀",
+        label="예측 모델 선택"
+        )
+
+    predict_button = gr.Button("연비 예측하기")
+    result_output = gr.Textbox(label="예측 결과", lines=4)
+    graph_output = gr.Plot(label="연비 예측 그래프")
+
+    predict_button.click(
+        fn=predict_mpg,
+        inputs=[weight_input, model_choice],
+        outputs=[result_output, graph_output]
+        )
+
+    gr.Markdown("## 모델 성능 비교")
+    compare_button = gr.Button("모델 성능 비교하기")
+    compare_output = gr.Plot()
+
+    compare_button.click(
+        fn=compare_models,
+        inputs=[],
+        outputs=compare_output
+        )
+
+    gr.Markdown(
+        f"""
+        ### 모델 평가 결과
+
+        - 선형회귀 MSE: {linear_mse:.2f}
+        - 비선형회귀 MSE: {poly_mse:.2f}
+        - 선형회귀 R²: {linear_r2:.4f}
+        - 비선형회귀 R²: {poly_r2:.4f}
+
+        ※ MPG를 km/L로 변환할 때는 0.425144를 곱합니다.
+        """
+        )
+
+demo.launch(share=True)
