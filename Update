@@ -1,0 +1,219 @@
+
+import pandas as pd
+import gradio as gr
+import matplotlib.pyplot as plt
+import numpy as np
+
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.metrics import mean_squared_error, r2_score
+
+# 한글 그래프 글꼴 설정
+plt.rcParams["font.family"] = "DejaVu Sans"
+plt.rcParams["axes.unicode_minus"] = False
+
+# 1. 자동차 데이터 불러오기
+url = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/mpg.csv"
+
+df = pd.read_csv(url)
+data = df[["weight", "mpg"]].dropna()
+
+X = data[["weight"]]
+y = data["mpg"]
+
+# 2. 학습 데이터와 테스트 데이터 분리
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# 3. 선형회귀 모델
+linear_model = LinearRegression()
+linear_model.fit(X_train, y_train)
+
+# 4. 비선형회귀 모델
+poly_model = make_pipeline(
+    PolynomialFeatures(degree=2),
+    LinearRegression()
+)
+poly_model.fit(X_train, y_train)
+
+# 5. 모델 성능 평가
+linear_pred = linear_model.predict(X_test)
+poly_pred = poly_model.predict(X_test)
+
+linear_mse = mean_squared_error(y_test, linear_pred)
+poly_mse = mean_squared_error(y_test, poly_pred)
+
+linear_r2 = r2_score(y_test, linear_pred)
+poly_r2 = r2_score(y_test, poly_pred)
+
+
+# 6. 예측 및 그래프 생성 함수
+def predict_mpg(weight, model_type):
+
+    if weight is None or weight <= 0:
+        return "올바른 자동차 무게를 입력하세요.", None
+
+    if model_type == "선형회귀":
+        model = linear_model
+        mse = linear_mse
+        r2 = linear_r2
+    else:
+        model = poly_model
+        mse = poly_mse
+        r2 = poly_r2
+
+    # 예측값 계산
+    prediction = model.predict(
+        pd.DataFrame({"weight": [weight]})
+    )[0]
+
+    # 그래프용 무게 범위
+    weight_range = np.linspace(
+        data["weight"].min(),
+        data["weight"].max(),
+        200
+    )
+
+    range_df = pd.DataFrame({"weight": weight_range})
+    predicted_curve = model.predict(range_df)
+
+    # 그래프 생성
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    # 실제 자동차 데이터
+    ax.scatter(
+        data["weight"],
+        data["mpg"],
+        alpha=0.45,
+        label="Actual data"
+    )
+
+    # 회귀 예측선
+    ax.plot(
+        weight_range,
+        predicted_curve,
+        linewidth=2.5,
+        label=model_type
+    )
+
+    # 입력한 자동차 위치
+    ax.scatter(
+        [weight],
+        [prediction],
+        s=130,
+        marker="*",
+        label="Your prediction",
+        zorder=5
+    )
+
+    ax.set_title("Car Weight vs Fuel Efficiency")
+    ax.set_xlabel("Weight (pounds)")
+    ax.set_ylabel("Fuel Efficiency (MPG)")
+    ax.legend()
+    ax.grid(True, alpha=0.25)
+
+    fig.tight_layout()
+
+    result = (
+        f"예측 자동차 연비: {prediction:.2f} MPG\n\n"
+        f"선택 모델: {model_type}\n"
+        f"결정계수 R²: {r2:.4f}\n"
+        f"평균제곱오차 MSE: {mse:.4f}"
+    )
+
+    return result, fig
+
+
+# 7. 모델 성능 비교 그래프
+def compare_models():
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+    names = ["Linear", "Nonlinear"]
+
+    axes[0].bar(
+        names,
+        [linear_r2, poly_r2]
+    )
+    axes[0].set_title("R² Comparison")
+    axes[0].set_ylabel("R²")
+    axes[0].grid(axis="y", alpha=0.25)
+
+    axes[1].bar(
+        names,
+        [linear_mse, poly_mse]
+    )
+    axes[1].set_title("MSE Comparison")
+    axes[1].set_ylabel("MSE")
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fig.tight_layout()
+
+    return fig
+
+
+# 8. 웹 프로그램 화면
+with gr.Blocks(title="자동차 연비 예측 시스템") as demo:
+
+    gr.Markdown(
+        """
+        # 🚗 자동차 연비 예측 계산기
+
+        선형회귀와 비선형회귀를 이용하여
+        자동차 무게에 따른 연비를 예측합니다.
+
+        실제 데이터와 예측 곡선을 그래프로 확인할 수 있습니다.
+        """
+    )
+
+    with gr.Row():
+
+        weight_input = gr.Number(
+            label="자동차 무게 (파운드)",
+            value=3000
+        )
+
+        model_input = gr.Radio(
+            choices=["선형회귀", "비선형회귀"],
+            value="선형회귀",
+            label="회귀 모델 선택"
+        )
+
+    predict_button = gr.Button(
+        "🔍 연비 예측하기",
+        variant="primary"
+    )
+
+    result_output = gr.Textbox(
+        label="예측 결과",
+        lines=5
+    )
+
+    graph_output = gr.Plot(
+        label="자동차 연비 예측 그래프"
+    )
+
+    predict_button.click(
+        fn=predict_mpg,
+        inputs=[weight_input, model_input],
+        outputs=[result_output, graph_output]
+    )
+
+    gr.Markdown("## 📊 선형회귀와 비선형회귀 성능 비교")
+
+    comparison_output = gr.Plot()
+
+    compare_button = gr.Button("모델 성능 비교하기")
+
+    compare_button.click(
+        fn=compare_models,
+        inputs=[],
+        outputs=comparison_output
+    )
+
+# 9. 프로그램 실행
+if __name__ == "__main__":
+    demo.launch()
